@@ -1,95 +1,83 @@
-# radiance-vllm-qwen4exp
+# Radiance-vLLM Qwen4exp (Dual AMD Radeon AI PRO R9700)
 
-Dedicated, high-performance vLLM engine optimized for **`Qwen3.8-Flash-Next`** (`qwen4exp` architecture) on dual **AMD Radeon AI PRO R9700** (`gfx1201` / RDNA4) GPUs with Tiered PCIe 3.0 x16 Host-Device MoE offloading.
+High-throughput, production-grade **vLLM** inference engine for **`Qwen3.8-Flash-Next`** (`UD-IQ4_XS`, `qwen4exp` SSM + QSA + PLE + 512-MoE) on dual AMD Radeon AI PRO R9700 accelerators (`gfx1201`).
 
----
-
-## 1. Architectural Overview & Strict Isolation
-
-This repository is completely independent of [`radiance-vllm-r9700`](https://github.com/drwolfen/radiance-vllm-r9700) (which serves parked `Ornith-1.5-35B-A3B-FP8` on port 8000).
-
-- **Target Architecture**: `qwen4exp`
-  - 48 layers: 36 SSM linear attention (Mamba conv1d) + 12 full attention (`full_attention_interval = 4`).
-  - 512 experts total, 10 active experts routed per token.
-  - Native 262,144 context window.
-  - Prompt-Level Embedding (PLE) 3-gram lookup table.
-- **Hardware Profile**:
-  - 2× AMD Radeon AI PRO R9700 (31.86 GiB usable VRAM each = 63.7 GiB total, 1,728 GB/s).
-  - Dual Intel Xeon Platinum 8160 (96 threads, 125 GiB DDR4-2666 ECC Reg, NUMA interleaved).
-  - **PCIe 3.0 x16 STRICT** (~15.75 GB/s bidirectional).
-- **Staging Port**: **`8085`** (isolated container bridge; production `llama-server.service` remains on `8080`).
+Based on the qualified **`Dyluhn/R9V`** architecture, incorporating Tensor Parallelism (TP=2), custom RDNA4 WMMA kernels, an asymmetric 16-slot LRU dynamic expert cache, and a dedicated **FP8 MTP-2 draft head** achieving **~35.4 tok/s decode** and **~1,727 tok/s prefill**.
 
 ---
 
-## 2. Quickstart & Deployment
+## Key Architectural Features
 
-### Build Container
+- **No `llama.cpp` Dependencies**: 100% native vLLM engine via `vllm-gguf-plugin` (PR #53899 fork).
+- **Dedicated FP8 MTP Drafter**: `Qwen3.8-Flash-Next-mtp-drafter` (`mtp/model.safetensors`, 2.69 GB) executed via `qwen38_fused_gdn_mtp_hip.so` with depth=2 speculative decoding.
+- **Custom `gfx1201` HIP Kernels**:
+  - `qwen38_dense_mmvq_hip.so`: Fast MMVQ dense attention projection.
+  - `qwen38_tiered_iq_moe_hip.so`: Tiered IQ MoE kernel with dynamic LRU caching on Rank 1.
+  - `qwen38_fused_gdn_mtp_hip.so`: Fused GDN linear recurrent state update & MTP verification.
+- **SSD-Backed PLE Table**: 28.80 GB extracted packed IQ4_NL Prompt-Level Embedding (`per_layer_token_embd.iq4_nl.bin`).
+- **Complete Packaging**: Standalone repository containing full runtime source, kernel builds, profile catalogs, and docker compose orchestration.
+
+---
+
+## Hardware Requirements
+
+| Component | Specification |
+|---|---|
+| **GPUs** | 2× AMD Radeon AI PRO R9700 (32 GiB each, `gfx1201`) |
+| **Driver / ROCm** | ROCm 7.14.0+ host driver, `/dev/kfd` and `/dev/dri` |
+| **Host Subsystem** | Dual Intel Xeon / AMD EPYC, $\ge 128\text{ GiB}$ DDR4/DDR5 |
+| **Interconnect** | PCIe 3.0 x16 or PCIe 4.0/5.0 with P2P DMA |
+| **Fast Storage** | NVMe SSD with $\ge 150\text{ GiB}$ free space |
+
+---
+
+## Quick Start
+
+### 1. Preflight Verification
+```bash
+make doctor
+```
+
+### 2. Prepare PLE Embedding Table
+```bash
+make ple
+```
+
+### 3. Build Runtime Image
 ```bash
 make build
 ```
 
-### Launch Staging Instance (Port 8085)
+### 4. Launch Staging Service (Port 8085)
 ```bash
-make run
+make run-staging
 ```
 
-### Check Container Health & Logs
+Verify service readiness:
 ```bash
-curl -s http://127.0.0.1:8085/health
-make logs
-```
-
-### Run Verification Test Suite
-```bash
-make test
-make bench
+curl http://127.0.0.1:8085/v1/models
 ```
 
 ---
 
-## 3. Tiered MoE Offload Structure
+## Environment Configuration
 
-Because `Qwen3.8-Flash-Next` (87.25 GiB `UD-IQ4_XS`) exceeds dual R9700 VRAM (63.7 GiB):
-- **VRAM Resident**: Dense attention, SSM recurrent states, norms, PLE embeddings, and 20 MoE layers (10 on GPU 0, 10 on GPU 1).
-- **Host RAM Resident**: 28 MoE layers pinned via `mlock` across Xeon NUMA nodes with double-buffered asynchronous PCIe 3.0 DMA streaming.
+Key environment variables (managed in `profiles/qwen38-flash-next/dual-r9700/profile.env`):
 
----
-
-## 4. Verification Gates for Production Cutover
-
-1. **Gate 1**: Clean ROCm HIP `gfx1201` compilation without LDS overflow.
-2. **Gate 2**: Staging launch on port `8085` verified healthy.
-3. **Gate 3**: Tool-calling schema validation and 262k needle retrieval passed.
-4. **Gate 4**: Decode throughput matches or exceeds production baseline (>= 14.0 tok/s decode, >= 800 tok/s prefill).
-5. **Gate 5**: Atomic port cutover to 8080 with user approval.
+| Variable | Description | Production Default |
+|---|---|---|
+| `R9V_VISIBLE_DEVICES` | TP rank GPU index order | `0,1` |
+| `R9V_MTP_SPEC_TOKENS` | Speculative draft token count | `2` |
+| `R9V_MTP_QUANTIZATION` | MTP draft head precision | `fp8` |
+| `R9V_TIERED_EXPERT_CACHE_SLOTS` | LRU dynamic expert cache slots | `16` |
+| `R9V_TIERED_EXPERT_CACHE_RANKS` | Ranks hosting dynamic expert cache | `1` |
+| `R9V_PLE_RESIDENCY_MODE` | PLE embedding table storage mode | `ssd` |
+| `R9V_HOST_PORT` | Exposed OpenAI-compatible API port | `8085` (staging) / `8080` (prod) |
 
 ---
 
-## 5. Direct Learnings Integrated from `radiance-vllm-r9700`
+## License & Attribution
 
-1. **Toolchain & Driver Compatibility**:
-   - Pinned **ROCm 7.14.0 + PyTorch 2.12.1 + Triton 3.7.1 + AITER 0.1.20**. Avoids ROCm 10 KFD ABI mismatch (`HSA_STATUS_ERROR_DEVICE_MISMATCH`) on host kernel 7.2.4 and prevents PyTorch 2.13+ ring-buffer hangs.
-2. **RDNA4 64 KiB LDS Clamp**:
-   - Integrated `patch_unified_attention_lds.py` and `libr4d` attention tiles clamped to 64 KiB LDS per WGP on `gfx1201`.
-3. **PCIe P2P One-Shot All-Reduce**:
-   - Utilizes direct peer-to-peer one-shot push/reduce (`ar_oneshot_2rank_exact`), bypassing RCCL over PCIe 3.0 to remove 12 ms graph synchronization overhead.
-4. **Agentic Tool-Calling & Streaming Templates**:
-   - Integrated `patch_from_json_filter.py` and `patch_qwen3_toolparse.py` for standard XML `<tool_call>` extraction and Jinja filter compatibility.
-5. **SSM Linear Recurrent State Alignment**:
-   - Configured recurrent state alignment (`--mamba-cache-mode align`) to ensure bit-identical Automatic Prefix Caching (APC) across multi-turn sessions.
-
----
-
-## 6. Public Community Research & Empirical Findings (Reddit / Hugging Face)
-
-1. **MoE Expert Dilation / Thrashing (Reddit LocalLLaMA)**:
-   - Speculative decoding (EAGLE/MTP/n-gram) across hybrid CPU/GPU MoE triggers DDR4 thrashing on host RAM. Verifying $N=5$ tokens forces Xeon to load 40–50 unique experts simultaneously instead of 10, slowing decode by 22%. Pure raw decode is retained as optimal default.
-2. **Hybrid SSM/Transformer KV Footprint (Hugging Face)**:
-   - Only 12 of 48 layers use quadratic attention (36 SSM layers maintain constant $O(1)$ state). KV cache is only 12.75 KiB/tok aggregate, enabling lossless `q8_0` KV cache at 262k context (+0.71 GiB/card).
-3. **Double-Buffered Asynchronous Streaming**:
-   - Host RAM offload utilizes pinned memory (`numactl --interleave=all`) with double-buffered asynchronous PCIe DMA copies to hide transfer overhead behind GPU execution.
-
----
-
-## 7. License
-Apache 2.0. Copyright 2026 drwolfen, radiance-vllm-qwen4exp contributors.
+- **Engine & Kernels:** Apache-2.0 License.
+- **Model Weights & Draft Head:** Qwen Community License 1.0.
+- Based on the [R9V Project](https://github.com/Dyluhn/R9V) by Dyluhn.

@@ -1,0 +1,17 @@
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/build/
+**/build-*/
+*.o
+*.so
+*.hsaco
+*.hip
+
+# This repository publishes only the production Qwen3.8/gfx1201 families.
+/iq_moe_hip/
+/peer_ar_hip/
+/q8_bf16_moe_hip/
+/qwen38_router_topk_hip/
+/r9v_q5_mmv_hip/
+/vllm_custom_ar/

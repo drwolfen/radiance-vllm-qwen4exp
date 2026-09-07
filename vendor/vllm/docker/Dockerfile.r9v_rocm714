@@ -1,0 +1,134 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: Apache-2.0
+#
+# R9V's gfx1201 runtime is pinned to the ROCm 7.14 development stack that was
+# qualified on Radeon R9700. Everything is rebuilt from the public pins below.
+
+ARG ROCM_BASE=rocm/dev-ubuntu-24.04:7.14.0-full@sha256:439edaa8f0c4be4a3728e528f87b8a2ea1f051f34cf10b27caa4bd94f562eda7
+ARG GFX_ARCH=gfx1201
+ARG TORCH_VERSION=2.11.0
+ARG TRITON_VERSION=3.6.0
+ARG TORCHVISION_VERSION=0.24.1
+ARG AITER_VERSION=0.1.19
+ARG FLYDSL_VERSION=0.2.4
+ARG TRANSFORMERS_VERSION=5.14.1
+
+FROM ${ROCM_BASE} AS wheel-builder
+
+ARG GFX_ARCH
+ARG TORCH_VERSION
+ARG TRITON_VERSION
+ARG TORCHVISION_VERSION
+ARG AITER_VERSION
+ARG MAX_JOBS=32
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTORCH_ROCM_ARCH=${GFX_ARCH} \
+    ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm \
+    USE_ROCM=1 USE_CUDA=0 MAX_JOBS=${MAX_JOBS} CMAKE_BUILD_PARALLEL_LEVEL=${MAX_JOBS}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git python3.12-venv build-essential ccache pkg-config \
+      libdrm-dev libnuma-dev libelf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/py
+ENV PATH=/opt/py/bin:$PATH
+
+RUN pip install -U pip wheel setuptools "setuptools-scm>=8.0" "cmake<4" ninja pybind11 numpy \
+      pyyaml typing_extensions cffi requests
+RUN mkdir -p /wheels
+
+# PyTorch's sanctioned ROCm 2.11 configuration, limited to gfx1201.
+RUN git clone --depth 1 -b v${TORCH_VERSION} --recurse-submodules --shallow-submodules \
+        https://github.com/pytorch/pytorch.git /src/pytorch \
+    && cd /src/pytorch \
+    && pip install -r requirements.txt \
+    && python tools/amd_build/build_amd.py \
+    && USE_MAGMA=0 USE_MKLDNN=1 BUILD_TEST=0 USE_NCCL=1 USE_RCCL=1 \
+       USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_AOTRITON=0 \
+       PYTORCH_BUILD_VERSION=${TORCH_VERSION}+rocm7.14 PYTORCH_BUILD_NUMBER=1 \
+       python setup.py bdist_wheel \
+    && cp dist/*.whl /wheels/ && pip install dist/*.whl && rm -rf /src/pytorch
+
+RUN git clone --depth 1 -b v${TRITON_VERSION} https://github.com/triton-lang/triton.git /src/triton \
+    && cd /src/triton && pip wheel --no-build-isolation --no-deps . -w /wheels \
+    && pip install /wheels/triton-*.whl && rm -rf /src/triton
+
+RUN git clone --depth 1 -b v${TORCHVISION_VERSION} https://github.com/pytorch/vision.git /src/vision \
+    && cd /src/vision && FORCE_CUDA=1 USE_ROCM=1 pip wheel --no-build-isolation --no-deps . -w /wheels \
+    && rm -rf /src/vision
+
+RUN git clone --recursive --shallow-submodules -b v${AITER_VERSION} https://github.com/ROCm/aiter.git /src/aiter \
+    && cd /src/aiter && GPU_ARCHS=${GFX_ARCH} PREBUILD_KERNELS=0 \
+       SETUPTOOLS_SCM_PRETEND_VERSION=${AITER_VERSION} \
+       pip wheel --no-build-isolation --no-deps . -w /wheels \
+    && pip install /wheels/*aiter-*.whl && rm -rf /src/aiter
+
+# Keep application revisions out of the heavyweight framework cache keys.
+ARG R9V_VLLM_VERSION
+COPY . /src/vllm
+RUN cd /src/vllm \
+ && python use_existing_torch.py \
+ && python -m pip install "setuptools-rust>=1.9" \
+ && VLLM_TARGET_DEVICE=rocm \
+      SETUPTOOLS_SCM_PRETEND_VERSION=${R9V_VLLM_VERSION} \
+      VLLM_VERSION_OVERRIDE=${R9V_VLLM_VERSION} \
+      python -m pip wheel --no-build-isolation --no-deps . --wheel-dir /wheels
+
+
+FROM ${ROCM_BASE} AS r9v-vllm-base
+
+ARG GFX_ARCH
+ARG AITER_VERSION
+ARG FLYDSL_VERSION
+ARG TRANSFORMERS_VERSION
+ARG R9V_VLLM_VERSION
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl g++ libgomp1 libnuma-dev numactl \
+      python3 python3.12 python3.12-dev python3.12-venv \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/r9v
+ENV VIRTUAL_ENV=/opt/r9v \
+    PATH=/opt/r9v/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    ROCM_PATH=/opt/rocm \
+    HIP_PATH=/opt/rocm \
+    HIP_PLATFORM=amd \
+    VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=${GFX_ARCH} \
+    HIP_ARCHITECTURES=${GFX_ARCH} \
+    AMDGPU_TARGETS=${GFX_ARCH} \
+    GPU_ARCHS=${GFX_ARCH} \
+    HSA_NO_SCRATCH_RECLAIM=1 \
+    SAFETENSORS_FAST_GPU=1 \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONDONTWRITEBYTECODE=1
+
+COPY --from=wheel-builder /wheels /wheels
+RUN python -m pip install --upgrade pip wheel setuptools \
+ && python -m pip install --no-deps \
+      /wheels/torch-*.whl /wheels/triton-*.whl \
+      /wheels/torchvision-*.whl /wheels/*aiter-*.whl \
+ && python -m pip install /wheels/vllm-*.whl \
+      "transformers==${TRANSFORMERS_VERSION}" \
+ && python -m pip install /opt/rocm/share/amd_smi pillow pybind11 \
+      "flydsl==${FLYDSL_VERSION}" \
+ && python -m pip check \
+ && WANT_VLLM=${R9V_VLLM_VERSION} WANT_AITER=${AITER_VERSION} \
+      WANT_FLYDSL=${FLYDSL_VERSION} WANT_TRANSFORMERS=${TRANSFORMERS_VERSION} \
+      python -c 'import importlib.metadata as m, os; \
+v=m.version("vllm"); a=m.version("amd-aiter"); f=m.version("flydsl"); t=m.version("transformers"); \
+assert v.startswith(os.environ["WANT_VLLM"]), (v, os.environ["WANT_VLLM"]); \
+assert a == os.environ["WANT_AITER"], (a, os.environ["WANT_AITER"]); \
+assert f == os.environ["WANT_FLYDSL"], (f, os.environ["WANT_FLYDSL"]); \
+assert t == os.environ["WANT_TRANSFORMERS"], (t, os.environ["WANT_TRANSFORMERS"]); \
+print("vllm", v, "amd-aiter", a, "flydsl", f, "transformers", t)'
+RUN rm -rf /wheels /root/.cache \
+ && find /opt/r9v -type f -name '*.so*' -exec strip --strip-unneeded {} + \
+      2>/dev/null || true
+
+ENTRYPOINT ["vllm", "serve"]

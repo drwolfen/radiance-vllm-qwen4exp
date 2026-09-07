@@ -1,0 +1,18 @@
+[package]
+name = "r9v-models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "R9V model architecture builder and model families (Spec 8, Spec 14 §2)"
+
+[dependencies]
+r9v-common = { path = "../r9v-common" }
+r9v-ir = { path = "../r9v-ir" }
+r9v-state = { path = "../r9v-state" }
+thiserror = "2.0"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

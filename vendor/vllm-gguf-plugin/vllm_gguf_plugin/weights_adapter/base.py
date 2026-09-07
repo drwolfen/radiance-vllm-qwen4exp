@@ -1,0 +1,95 @@
+# R9V modification: Qwen3.8 Flash Next GGUF/ROCm integration.
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+import torch
+
+from ..gguf_files import GGUFModelFiles
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+    from vllm.config import ModelConfig
+
+    from ..quantization.layout import GGUFLinearLayout
+
+
+GGUFWeight = tuple[str, torch.Tensor]
+
+
+class BaseGGUFWeightsAdapter(ABC):
+    """Model-specific GGUF name mapping and tensor transformation hooks."""
+
+    #: Modules that never load weights from GGUF (e.g. shared with the target
+    #: model in speculative decoding) and must stay unquantized.
+    extra_unquantized_modules: tuple[str, ...] = ()
+
+    @classmethod
+    @abstractmethod
+    def matches(cls, config: PretrainedConfig) -> bool:
+        """Return whether this adapter supports *config*."""
+
+    @classmethod
+    def architecture(cls, config: PretrainedConfig) -> str | None:
+        """Return an architecture override required before model loading."""
+        del config
+        return None
+
+    @abstractmethod
+    def build_name_map(
+        self,
+        files: GGUFModelFiles,
+        model_config: ModelConfig,
+    ) -> dict[str, str]:
+        """Map raw GGUF tensor names to names accepted by the model."""
+
+    def patch_hf_config(
+        self,
+        files: GGUFModelFiles,
+        hf_config: PretrainedConfig,
+    ) -> PretrainedConfig:
+        """Patch HF config before model init."""
+        del files
+        return hf_config
+
+    def get_linear_layouts(
+        self,
+        files: GGUFModelFiles,
+        model_config: ModelConfig,
+        name_map: dict[str, str],
+    ) -> dict[str, GGUFLinearLayout]:
+        """Describe layouts required by GGUF linear weights."""
+        del files, model_config, name_map
+        return {}
+
+    def get_additional_unquantized_modules(
+        self,
+        files: GGUFModelFiles,
+        model_config: ModelConfig,
+        name_map: dict[str, str],
+    ) -> tuple[str, ...]:
+        """Return model-specific modules that must load dense weights."""
+        del files, model_config, name_map
+        return ()
+
+    def get_ple_offload_prefixes(
+        self,
+        model_config: ModelConfig,
+    ) -> tuple[str, ...]:
+        """Return mapped weight prefixes owned by the PLE CPU worker."""
+        del model_config
+        return ()
+
+    def transform_weights(
+        self,
+        weights: Iterable[GGUFWeight],
+        model_config: ModelConfig,
+    ) -> Iterable[GGUFWeight]:
+        """Apply model-specific transformations to mapped weights."""
+        del model_config
+        yield from weights

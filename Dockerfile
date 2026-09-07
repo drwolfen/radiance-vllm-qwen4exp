@@ -1,20 +1,49 @@
-# radiance-vllm-qwen4exp: Fast layered build on validated RDNA4 gfx1201 base
-# Base image contains vLLM 0.28.0, PyTorch 2.12.1+rocm7.14, AITER 0.1.20, libr4d
-ARG BASE_IMAGE=radiance-vllm:0.10.0
+# SPDX-License-Identifier: Apache-2.0
+# Radiance-vLLM Qwen4exp (Dual AMD Radeon AI PRO R9700 gfx1201)
+# Pinned runtime overlay for vLLM GGUF plugin and R9V gfx1201 native kernels.
+
+ARG BASE_IMAGE=r9v-vllm-qwen38-base:latest
 FROM ${BASE_IMAGE}
 
-WORKDIR /app
-COPY . /app
+ARG GFX_ARCH=gfx1201
+ENV VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=${GFX_ARCH} \
+    HIP_ARCHITECTURES=${GFX_ARCH} \
+    AMDGPU_TARGETS=${GFX_ARCH} \
+    GPU_ARCHS=${GFX_ARCH} \
+    SAFETENSORS_FAST_GPU=1 \
+    TOKENIZERS_PARALLELISM=false \
+    RADIANCE_USE_R4D=0 \
+    RADIANCE_USE_R4D_AR=0 \
+    RADIANCE_USE_R4D_GDN=0 \
+    RADIANCE_USE_R4D_AR_QUANT=0
 
-RUN chmod +x /app/*.sh /app/tests/*.py 2>/dev/null || true
+USER root
+COPY vendor/vllm-gguf-plugin /opt/r9v/src/vllm-gguf-plugin
+RUN python3 -m pip install --no-build-isolation --no-cache-dir \
+      /opt/r9v/src/vllm-gguf-plugin
 
-ENV PYTORCH_ROCM_ARCH=gfx1201 \
-    VLLM_TARGET_DEVICE=rocm \
-    VLLM_LOGGING_LEVEL=INFO
+COPY kernels/r9v-gfx1201 /opt/r9v/src/kernels
+RUN VLLM_GGUF_PLUGIN_CSRC=/opt/r9v/src/vllm-gguf-plugin/vllm_gguf_plugin/csrc \
+      QWEN38_DENSE_MMVQ_BUILD_DIR=/opt/r9v/build/dense \
+      python3 /opt/r9v/src/kernels/dense_mmvq_hip/build_extension.py \
+ && VLLM_GGUF_PLUGIN_CSRC=/opt/r9v/src/vllm-gguf-plugin/vllm_gguf_plugin/csrc \
+      python3 /opt/r9v/src/kernels/tiered_iq_moe_hip/build_extension.py \
+        --build-directory /opt/r9v/build/tiered \
+        --variants auto,u2,u5,u10,reuse3,reuse3v2 \
+ && QWEN38_GDN_BUILD_DIR=/opt/r9v/build/gdn \
+      python3 /opt/r9v/src/kernels/fused_gdn_mtp_hip/build_extension.py \
+ && install -d /opt/r9v/kernels \
+ && install -m 0755 /opt/r9v/build/dense/qwen38_dense_mmvq_hip.so \
+      /opt/r9v/kernels/ \
+ && install -m 0755 /opt/r9v/build/tiered/qwen38_tiered_iq_moe_hip.so \
+      /opt/r9v/kernels/ \
+ && install -m 0755 /opt/r9v/build/gdn/qwen38_fused_gdn_mtp_hip.so \
+      /opt/r9v/kernels/ \
+ && rm -rf /opt/r9v/build /opt/r9v/src
 
-EXPOSE 8000 8085
+ENV QWEN38_DENSE_MMVQ_HIP_SO=/opt/r9v/kernels/qwen38_dense_mmvq_hip.so \
+    QWEN38_TIERED_IQ_MOE_HIP_SO=/opt/r9v/kernels/qwen38_tiered_iq_moe_hip.so \
+    QWEN38_FUSED_GDN_MTP_HIP_SO=/opt/r9v/kernels/qwen38_fused_gdn_mtp_hip.so
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
-    CMD curl -f http://127.0.0.1:8000/health || exit 1
-
-ENTRYPOINT ["/app/radiance_entrypoint.sh"]
+ENTRYPOINT ["vllm", "serve"]

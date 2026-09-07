@@ -1,0 +1,96 @@
+name: ci/cpu-only
+
+on:
+  push:
+    branches: ["main", "engine/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpu-only-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-only:
+    name: ci/cpu-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: DCO check
+        run: |
+          echo "Verifying DCO sign-off on commits..."
+          COMMITS=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            echo "Pull request check: $BASE_SHA..$HEAD_SHA"
+            COMMITS=$(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git rev-parse --verify "$BEFORE" >/dev/null 2>&1; then
+              echo "Push check: $BEFORE..HEAD"
+              COMMITS=$(git rev-list --no-merges "$BEFORE..HEAD")
+            elif git rev-parse --verify origin/main >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+              echo "Push check against origin/main: origin/main..HEAD"
+              COMMITS=$(git rev-list --no-merges origin/main..HEAD)
+            else
+              echo "Push check single commit: HEAD"
+              COMMITS=$(git rev-list --no-merges -n 1 HEAD)
+            fi
+          else
+            if git rev-parse --verify origin/main >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+              COMMITS=$(git rev-list --no-merges origin/main..HEAD)
+            else
+              COMMITS=$(git rev-list --no-merges -n 1 HEAD)
+            fi
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            echo "No commits in range to verify."
+          fi
+
+          MISSING_DCO=0
+          for commit in $COMMITS; do
+            echo "Checking commit $commit..."
+            if ! git log -n 1 --format="%B" "$commit" | grep -q "^Signed-off-by:"; then
+              echo "Commit $commit is missing Signed-off-by"
+              MISSING_DCO=1
+            fi
+          done
+          if [ "$MISSING_DCO" -ne 0 ]; then
+            echo "DCO check failed: Every commit must include a Signed-off-by trailer."
+            exit 1
+          fi
+          echo "DCO check passed."
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          components: rustfmt, clippy
+
+      - name: Install cargo-deny
+        run: |
+          curl -sL "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C ~/.cargo/bin --strip-components=1 "cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny"
+
+      - name: Run Rust CPU gates
+        run: ./scripts/ci-gates.sh rust
+
+      - name: Verify xtask docs
+        run: ./scripts/ci-gates.sh docs
+
+      - name: Verify xtask gen
+        run: ./scripts/ci-gates.sh gen
+
+      - name: Source policy checks (Spec 4 §8, Spec 14 §2/§5.1)
+        run: ./scripts/ci-gates.sh policy

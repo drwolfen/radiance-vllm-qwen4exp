@@ -1,47 +1,55 @@
-version: "3.8"
-
 services:
-  vllm-qwen4exp:
-    container_name: vllm-qwen4exp
-    image: drwolfen/radiance-vllm-qwen4exp:0.1.0
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ipc: host
-    shm_size: "32gb"
+  radiance-vllm-qwen4exp:
+    image: ${R9V_IMAGE:-r9v-qwen38-flash-next:latest}
+    container_name: ${R9V_CONTAINER_NAME:-radiance-vllm-qwen4exp}
     network_mode: bridge
     ports:
-      - "8085:8000"
+      - "${R9V_HOST_PORT:-8085}:8004"
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
-    security_opt:
-      - seccomp=unconfined
     group_add:
-      - video
-      - render
+      - "44"   # video
+      - "110"  # render
+    security_opt:
+      - label=disable
+    shm_size: "32g"
+    ipc: host
+    ulimits:
+      memlock: -1
+      nofile:
+        soft: 1048576
+        hard: 1048576
     volumes:
-      - /home/ydj/LLM-Models:/models:ro
-      - ./qwen4exp:/app/qwen4exp:ro
+      - ${R9V_MODEL_DIR:-/home/ydj/LLM-Models/qwen38-r9v}:/models:ro
+      - ${R9V_DATA_DIR:-/home/ydj/r9v-data}:/r9v-data:rw
+      - ${R9V_CACHE_DIR:-/home/ydj/r9v-data/cache}:/root/.cache:rw
     environment:
-      - HSA_ENABLE_SDMA=1
-      - GPU_MAX_HW_QUEUES=1
-      - HIP_VISIBLE_DEVICES=0,1
-      - ROCR_VISIBLE_DEVICES=0,1
-      - PYTORCH_ROCM_ARCH=gfx1201
       - VLLM_TARGET_DEVICE=rocm
-      - VLLM_LOGGING_LEVEL=INFO
-      - VLLM_ENGINE_ITERATION_TIMEOUT_S=300
-    command: >
-      python3 -m vllm.entrypoints.openai.api_server
-      --model /models/Qwen3.8-Flash-Next-UD-IQ4_XS
-      --served-model-name Qwen3.8-Flash-Next
-      --tensor-parallel-size 2
-      --max-model-len 262144
-      --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.92
-      --enable-reasoning
-      --reasoning-parser qwen3
-      --port 8000
-      --host 0.0.0.0
+      - PYTORCH_ROCM_ARCH=gfx1201
+      - HIP_ARCHITECTURES=gfx1201
+      - AMDGPU_TARGETS=gfx1201
+      - GPU_ARCHS=gfx1201
+      - HIP_VISIBLE_DEVICES=${R9V_VISIBLE_DEVICES:-0,1}
+      - R9V_MTP_SPEC_TOKENS=2
+      - R9V_MTP_QUANTIZATION=fp8
+      - R9V_TIERED_IQ_MOE_VARIANT=reuse3v2
+      - R9V_TIERED_PREFILL_GROUP_SIZE=16
+      - R9V_TIERED_EXPERT_CACHE_SLOTS=16
+      - R9V_TIERED_EXPERT_CACHE_RANKS=1
+      - R9V_ENABLE_FUSED_GDN_MTP=1
+      - R9V_PLE_RESIDENCY_MODE=ssd
+      - R9V_PLE_PATH=/r9v-data/per_layer_token_embd.iq4_nl.bin
+    command:
+      - /models
+      - --served-model-name
+      - ${R9V_SERVED_MODEL_NAME:-qwen3.8-flash-next}
+      - --tensor-parallel-size
+      - "2"
+      - --max-model-len
+      - "131072"
+      - --port
+      - "8004"
+      - --host
+      - "0.0.0.0"
+    restart: unless-stopped
