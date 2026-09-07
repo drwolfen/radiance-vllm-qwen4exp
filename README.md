@@ -342,7 +342,7 @@ Output:
 * Production maps `-p 8000:8000 -p 8080:8000 -p 8088:8000`.
 * If port 8000 is used exclusively, ensure UFW allows LAN access:
   ```bash
-  sudo ufw allow from 192.168.41.0/24 to any port 8000 proto tcp comment 'vLLM API'
+  sudo ufw allow from <YOUR_LAN_SUBNET> to any port 8000 proto tcp comment 'vLLM API'
   ```
 
 ---
