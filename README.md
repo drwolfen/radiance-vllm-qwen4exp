@@ -232,6 +232,12 @@ docker run -d \
   --port 8000
 ```
 
+> [!IMPORTANT]
+> **Realistic Initial Model Loading Time**:
+> Initial cold startup takes **approximately 20–35 minutes**.
+> The architecture contains 48 layers with 512 MoE experts per layer (total 24,576 individual expert weight tensors) that are unpacked, validated, and mapped across dual GPUs (VRAM) and the 112.5 GiB host UVA pinned RAM pool, alongside verifying the 28.80 GiB SSD-backed PLE table.
+> Sustained high multi-core CPU utilization (300%+ per worker process, accumulating 1.5–2 hours of cumulative core-time) during this phase is expected behavior. Do **not** terminate or restart the container while `Worker_TP0` and `Worker_TP1` are processing. Once loaded, all weights remain memory-resident for zero-overhead inference.
+
 ### Step 4: Verify Connectivity
 
 ```bash
