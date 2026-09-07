@@ -65,5 +65,31 @@ Because `Qwen3.8-Flash-Next` (87.25 GiB `UD-IQ4_XS`) exceeds dual R9700 VRAM (63
 
 ---
 
-## 5. License
+## 5. Direct Learnings Integrated from `radiance-vllm-r9700`
+
+1. **Toolchain & Driver Compatibility**:
+   - Pinned **ROCm 7.14.0 + PyTorch 2.12.1 + Triton 3.7.1 + AITER 0.1.20**. Avoids ROCm 10 KFD ABI mismatch (`HSA_STATUS_ERROR_DEVICE_MISMATCH`) on host kernel 7.2.4 and prevents PyTorch 2.13+ ring-buffer hangs.
+2. **RDNA4 64 KiB LDS Clamp**:
+   - Integrated `patch_unified_attention_lds.py` and `libr4d` attention tiles clamped to 64 KiB LDS per WGP on `gfx1201`.
+3. **PCIe P2P One-Shot All-Reduce**:
+   - Utilizes direct peer-to-peer one-shot push/reduce (`ar_oneshot_2rank_exact`), bypassing RCCL over PCIe 3.0 to remove 12 ms graph synchronization overhead.
+4. **Agentic Tool-Calling & Streaming Templates**:
+   - Integrated `patch_from_json_filter.py` and `patch_qwen3_toolparse.py` for standard XML `<tool_call>` extraction and Jinja filter compatibility.
+5. **SSM Linear Recurrent State Alignment**:
+   - Configured recurrent state alignment (`--mamba-cache-mode align`) to ensure bit-identical Automatic Prefix Caching (APC) across multi-turn sessions.
+
+---
+
+## 6. Public Community Research & Empirical Findings (Reddit / Hugging Face)
+
+1. **MoE Expert Dilation / Thrashing (Reddit LocalLLaMA)**:
+   - Speculative decoding (EAGLE/MTP/n-gram) across hybrid CPU/GPU MoE triggers DDR4 thrashing on host RAM. Verifying $N=5$ tokens forces Xeon to load 40–50 unique experts simultaneously instead of 10, slowing decode by 22%. Pure raw decode is retained as optimal default.
+2. **Hybrid SSM/Transformer KV Footprint (Hugging Face)**:
+   - Only 12 of 48 layers use quadratic attention (36 SSM layers maintain constant $O(1)$ state). KV cache is only 12.75 KiB/tok aggregate, enabling lossless `q8_0` KV cache at 262k context (+0.71 GiB/card).
+3. **Double-Buffered Asynchronous Streaming**:
+   - Host RAM offload utilizes pinned memory (`numactl --interleave=all`) with double-buffered asynchronous PCIe DMA copies to hide transfer overhead behind GPU execution.
+
+---
+
+## 7. License
 Apache 2.0. Copyright 2026 drwolfen, radiance-vllm-qwen4exp contributors.
