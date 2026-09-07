@@ -2,8 +2,8 @@
 # Based on Dyluhn/R9V architecture with dedicated FP8 MTP-2 Drafter
 
 SHELL := /bin/bash
-MODEL_DIR ?= /home/ydj/LLM-Models/qwen38-r9v
-DATA_DIR ?= /home/ydj/r9v-data
+MODEL_DIR ?= $(HOME)/LLM-Models/qwen38-r9v
+DATA_DIR ?= $(HOME)/r9v-data
 HOST_PORT ?= 8085
 MAX_JOBS ?= 32
 

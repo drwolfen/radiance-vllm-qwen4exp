@@ -21,9 +21,9 @@ services:
         soft: 1048576
         hard: 1048576
     volumes:
-      - ${R9V_MODEL_DIR:-/home/ydj/LLM-Models/qwen38-r9v}:/models:ro
-      - ${R9V_DATA_DIR:-/home/ydj/r9v-data}:/r9v-data:rw
-      - ${R9V_CACHE_DIR:-/home/ydj/r9v-data/cache}:/root/.cache:rw
+      - ${R9V_MODEL_DIR:-${HOME}/LLM-Models/qwen38-r9v}:/models:ro
+      - ${R9V_DATA_DIR:-${HOME}/r9v-data}:/r9v-data:rw
+      - ${R9V_CACHE_DIR:-${HOME}/r9v-data/cache}:/root/.cache:rw
     environment:
       - VLLM_TARGET_DEVICE=rocm
       - PYTORCH_ROCM_ARCH=gfx1201

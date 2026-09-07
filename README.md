@@ -107,7 +107,7 @@ make ple
 
 Ensure GGUF model shards and MTP weights are organized in your model path:
 ```text
-/home/ydj/LLM-Models/qwen38-r9v/
+${MODEL_DIR:-${HOME}/LLM-Models/qwen38-r9v}/
 ├── manifests/
 │   └── hot-manifest-q4-vision-128k-multiprompt-r1-lru16-neutral.json
 ├── metadata/
@@ -141,9 +141,9 @@ docker run -d \
   -p 8088:8000 \
   --device /dev/kfd \
   --device /dev/dri \
-  -v /home/ydj/LLM-Models/qwen38-r9v:/models:ro \
-  -v /home/ydj/r9v-data/per_layer_token_embd.iq4_nl.bin:/ple/per_layer_token_embd.iq4_nl.bin:ro \
-  -v /home/ydj/r9v-data/cache:/cache \
+  -v ${MODEL_DIR:-${HOME}/LLM-Models/qwen38-r9v}:/models:ro \
+  -v ${DATA_DIR:-${HOME}/r9v-data}/per_layer_token_embd.iq4_nl.bin:/ple/per_layer_token_embd.iq4_nl.bin:ro \
+  -v ${DATA_DIR:-${HOME}/r9v-data}/cache:/cache \
   -e RADIANCE_CPU_OFFLOAD_GB_BY_DEVICE=112.5,112.5 \
   -e QWEN38_USE_DENSE_MMVQ_REUSE4=0 \
   -e QWEN38_FUSED_HC_UP_MIX=1 \
