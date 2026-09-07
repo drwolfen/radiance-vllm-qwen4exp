@@ -273,17 +273,29 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 
 ---
 
-## 📊 Verified Benchmarks & Performance Metrics
+## 📊 Serving Benchmark Results
 
-Hardware setup: 2× AMD Radeon AI PRO R9700 (32 GiB each, total 64 GiB VRAM), Dual Xeon 8160 (96 threads), 125 GiB host RAM.
+**Tested Model**: `Qwen3.8-Flash-Next-UD-IQ4_XS` (`qwen4exp`, 48 layers, 512 experts/layer, 131,072 context)  
+**Hardware Configuration**: 2× AMD Radeon AI PRO R9700 (32 GiB each, total 64 GiB VRAM), Dual Intel Xeon Gold 8160 (96 threads, 125 GiB host RAM)  
+**Environment**: ROCm 7.14 / vLLM 0.26.1+r9v (TP=2) / PyTorch 2.12.1 / Triton 3.7.1 / MTP-2 Speculative Head  
 
-| Metric | Target / Baseline (Reddit) | llama.cpp Baseline | **Radiance-vLLM (R9V TP=2)** |
-|---|---|---|---|
-| **Decode Speed** | ~35.4 tok/s | ~14.0 tok/s | **43.15 tok/s (sustained warm)** |
-| **Prefill Speed** | ~1,727 tok/s | ~810 tok/s | **1,727.4 tok/s** |
-| **MTP Draft Acceptance** | ~70% | N/A (unsupported) | **72.6% avg (Pos 1: 81.7%, Pos 2: 63.5%)** |
-| **Context Length** | 131,072 tokens | 131,072 tokens | **131,072 tokens (FULL_DECODE cudagraphs)** |
-| **Tool Calling Synthesis** | Unverified | Partial | **100% Pass (`qwen3_coder` parser)** |
+### Production 131k Context Serving Configuration (`--max-model-len 131072`)
+
+Benchmark executed via `tests/vllm_benchmark_suite.py` measuring end-to-end streaming token latency, TTFT, TPOT, and concurrency scaling:
+
+| Concurrency | Total Throughput (tok/s) | Request Rate | TTFT (p50) | TTFT (p95) | TPOT (p50) | TPOT (p95) | E2E Latency (p50) |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1 Stream** | **23.7 tok/s** | 0.19 req/s | **735.4 ms** | 770.0 ms | **101.5 ms** | 118.6 ms | 5.50 s |
+| **2 Streams** | **21.8 tok/s** | 0.17 req/s | **5,880.8 ms** | 8,037.2 ms | **87.4 ms** | 122.0 ms | 11.10 s |
+| **4 Streams** | **26.5 tok/s** | 0.21 req/s | **16,397.7 ms** | 18,046.6 ms | **81.4 ms** | 104.5 ms | 19.28 s |
+| **8 Streams** | **44.8 tok/s** | 0.35 req/s | **19,717.2 ms** | 20,962.8 ms | **39.6 ms** | 62.1 ms | 21.87 s |
+| **16 Streams** | **46.4 tok/s** | 0.36 req/s | **39,666.1 ms** | 43,726.1 ms | **38.7 ms** | 64.5 ms | 42.29 s |
+
+* **Peak Batched Generation**: **46.4 tokens/sec** under saturated multi-stream concurrency with speculative MTP-2 validation.
+* **Inter-Token Latency (TPOT)**: Scales from **101.5 ms** single-stream down to **38.7 ms** under batched decode.
+* **Speculative MTP Acceptance**: High draft acceptance rate averaging **78.1% – 100.0%** across live workloads.
+* **Automatic Prefix Caching (APC)**: Measured **1.06x speedup** on shared prompt prefixes (Cold TTFT 1,284 ms vs. Warm TTFT 1,210 ms).
+* **Tool Calling & Agent Verification**: 100% Pass (`qwen3_coder` parser with native function calling schema).
 
 ---
 
