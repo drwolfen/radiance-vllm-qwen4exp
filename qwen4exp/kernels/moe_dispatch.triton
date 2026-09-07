@@ -1,0 +1,22 @@
+# Triton 512-Expert Dynamic Router for AMD gfx1201
+# Top-10 selection with balanced wave32 dispatch
+
+import triton
+import triton.language as tl
+
+@triton.jit
+def moe_top10_gather_kernel(
+    logits_ptr,
+    indices_ptr,
+    weights_ptr,
+    stride_lm, stride_ln,
+    stride_im, stride_in,
+    stride_wm, stride_wn,
+    num_tokens,
+    num_experts: tl.constexpr,
+    top_k: tl.constexpr
+):
+    pid = tl.program_id(0)
+    if pid >= num_tokens:
+        return
+    # Top-K gather implementation

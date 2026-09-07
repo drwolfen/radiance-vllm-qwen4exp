@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  vllm-qwen4exp:
+    container_name: vllm-qwen4exp
+    image: drwolfen/radiance-vllm-qwen4exp:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ipc: host
+    shm_size: "32gb"
+    network_mode: bridge
+    ports:
+      - "8085:8000"
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    security_opt:
+      - seccomp=unconfined
+    group_add:
+      - video
+      - render
+    volumes:
+      - /home/ydj/LLM-Models:/models:ro
+      - ./qwen4exp:/app/qwen4exp:ro
+    environment:
+      - HSA_ENABLE_SDMA=1
+      - GPU_MAX_HW_QUEUES=1
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+      - PYTORCH_ROCM_ARCH=gfx1201
+      - VLLM_TARGET_DEVICE=rocm
+      - VLLM_LOGGING_LEVEL=INFO
+      - VLLM_ENGINE_ITERATION_TIMEOUT_S=300
+    command: >
+      python3 -m vllm.entrypoints.openai.api_server
+      --model /models/Qwen3.8-Flash-Next-UD-IQ4_XS
+      --served-model-name Qwen3.8-Flash-Next
+      --tensor-parallel-size 2
+      --max-model-len 262144
+      --kv-cache-dtype fp8
+      --gpu-memory-utilization 0.92
+      --enable-reasoning
+      --reasoning-parser qwen3
+      --port 8000
+      --host 0.0.0.0
