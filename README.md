@@ -98,7 +98,6 @@ flowchart TD
 | **MoE Cache Distribution** | Symmetric expert allocation or full CPU offload | **Asymmetric 16-slot LRU Dynamic Cache on Rank 1** (`SLOTS=16`, `RANKS=1`) | GPU0 hosts 329 static experts; GPU1 hosts 369 static + 16 dynamic LRU slots. Optimizes VRAM distribution while leaving ~9 GiB usable VRAM on GPU1 for ComfyUI coexistence (`--reserve-vram 2`). |
 | **IPC & Memory Locking** | Standard container defaults (`/dev/shm` 64 MB, default ulimits) | **Hardened Host IPC (`--ipc=host`) & Unlimited Locked Memory (`memlock=-1`)** | Resolves Torch `shm_broadcast` deadlock under heavy multi-turn concurrency; prevents OS disk-swapping of the 112.5 GiB UVA pinned host RAM pool. |
 | **Agentic Tool Calling** | Raw completion API or generic tool parsers | **Native `--tool-call-parser qwen3_coder`** with multi-tool roundtrips | Provides 100% reliable multi-tool JSON extraction and reasoning synthesis for autonomous agents (Hermes Agent, Open-WebUI) without intermediate proxy translation. |
-| **Deployment & Packaging** | Multi-step research setup with loose dependencies | **Turnkey Production Container & Direct Multi-Port Binding** (`8000`, `8080`, `8088`) | Direct drop-in replacement for legacy llama-server installations with zero proxy latency, Makefile automation (`make ple`, `make doctor`), and pre-verified environment profiles. |
 
 ---
 
@@ -122,7 +121,7 @@ make ple
 
 Ensure GGUF model shards and MTP weights are organized in your model path:
 ```text
-${MODEL_DIR:-${HOME}/LLM-Models/qwen38-r9v}/
+${MODEL_DIR:-/path/to/models/qwen38-r9v}/
 ├── manifests/
 │   └── hot-manifest-q4-vision-128k-multiprompt-r1-lru16-neutral.json
 ├── metadata/
@@ -156,7 +155,7 @@ docker run -d \
   -p 8088:8000 \
   --device /dev/kfd \
   --device /dev/dri \
-  -v ${MODEL_DIR:-${HOME}/LLM-Models/qwen38-r9v}:/models:ro \
+  -v ${MODEL_DIR:-/path/to/models/qwen38-r9v}:/models:ro \
   -v ${DATA_DIR:-${HOME}/r9v-data}/per_layer_token_embd.iq4_nl.bin:/ple/per_layer_token_embd.iq4_nl.bin:ro \
   -v ${DATA_DIR:-${HOME}/r9v-data}/cache:/cache \
   -e RADIANCE_CPU_OFFLOAD_GB_BY_DEVICE=112.5,112.5 \
@@ -285,14 +284,6 @@ Hardware setup: 2× AMD Radeon AI PRO R9700 (32 GiB each, total 64 GiB VRAM), Du
 | **MTP Draft Acceptance** | ~70% | N/A (unsupported) | **72.6% avg (Pos 1: 81.7%, Pos 2: 63.5%)** |
 | **Context Length** | 131,072 tokens | 131,072 tokens | **131,072 tokens (FULL_DECODE cudagraphs)** |
 | **Tool Calling Synthesis** | Unverified | Partial | **100% Pass (`qwen3_coder` parser)** |
-
-### 3-Tier Cluster Comparison
-
-| Tier | Host | Model | Throughput | Role |
-|---|---|---|---|---|
-| **`local-heavy`** | `.244:8080` / `:8000` | **Qwen3.8-Flash-Next UD-IQ4_XS** | **35.3–43.2 tok/s** | Main Agent Reasoning, Architecture, Vision |
-| **`local-medium`** | `.150:8083` | Qwen3-14B-Q4_K_M + Eagle-3 | 37.3 tok/s | Delegation, Subagents, Web Extract |
-| **`local-light`** | `.246:8090` | Qwen3-8B-Q4_K_M Dense | 63.5 tok/s | Approvals, Fast Triage, Skills Hub |
 
 ---
 
