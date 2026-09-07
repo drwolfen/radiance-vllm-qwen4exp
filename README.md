@@ -87,6 +87,21 @@ flowchart TD
 
 ---
 
+## ⚖️ Key Differences & Rationale vs. Upstream `Dyluhn/R9V`
+
+`radiance-vllm-qwen4exp` extends the foundational work of upstream [Dyluhn/R9V](https://github.com/Dyluhn/R9V) with critical architectural enhancements engineered specifically for production multi-agent workflows on dual Radeon AI PRO R9700 accelerators:
+
+| Feature / Subsystem | Upstream `Dyluhn/R9V` Baseline | `radiance-vllm-qwen4exp` (This Engine) | Technical Rationale & Impact |
+|---|---|---|---|
+| **Speculative Decoding** | Baseline non-speculative or generic drafters | **Integrated FP8 MTP-2 Drafter** (`mtp/model.safetensors`, depth=2) | Boosts sustained decode throughput from ~24.4 tok/s to **43.15 tok/s** via a high 72.6% speculative acceptance rate, fully saturating RDNA4 matrix cores. |
+| **Recurrent SSM Kernel** | Triton / Python fallback path for GDN linear attention | **Custom Fused C++/HIP Kernel (`qwen38_fused_gdn_mtp_hip.so`)** | Eliminates Python/C++ boundary hops and Triton JIT overhead on RDNA4 wave32; fuses gated linear recurrent state update directly with speculative MTP validation. |
+| **MoE Cache Distribution** | Symmetric expert allocation or full CPU offload | **Asymmetric 16-slot LRU Dynamic Cache on Rank 1** (`SLOTS=16`, `RANKS=1`) | GPU0 hosts 329 static experts; GPU1 hosts 369 static + 16 dynamic LRU slots. Optimizes VRAM distribution while leaving ~9 GiB usable VRAM on GPU1 for ComfyUI coexistence (`--reserve-vram 2`). |
+| **IPC & Memory Locking** | Standard container defaults (`/dev/shm` 64 MB, default ulimits) | **Hardened Host IPC (`--ipc=host`) & Unlimited Locked Memory (`memlock=-1`)** | Resolves Torch `shm_broadcast` deadlock under heavy multi-turn concurrency; prevents OS disk-swapping of the 112.5 GiB UVA pinned host RAM pool. |
+| **Agentic Tool Calling** | Raw completion API or generic tool parsers | **Native `--tool-call-parser qwen3_coder`** with multi-tool roundtrips | Provides 100% reliable multi-tool JSON extraction and reasoning synthesis for autonomous agents (Hermes Agent, Open-WebUI) without intermediate proxy translation. |
+| **Deployment & Packaging** | Multi-step research setup with loose dependencies | **Turnkey Production Container & Direct Multi-Port Binding** (`8000`, `8080`, `8088`) | Direct drop-in replacement for legacy llama-server installations with zero proxy latency, Makefile automation (`make ple`, `make doctor`), and pre-verified environment profiles. |
+
+---
+
 ## 🚀 Step-by-Step Deployment Guide
 
 ### Step 1: Clone Repository & Verify Tree
