@@ -5,11 +5,11 @@
 [![ROCm: 7.14.0 / 7.2.4](https://img.shields.io/badge/ROCm-7.14.0%20%2F%207.2.4-blue.svg)]()
 [![vLLM: 0.28.0](https://img.shields.io/badge/vLLM-0.28.0-orange.svg)]()
 [![PyTorch: 2.11+rocm7.14](https://img.shields.io/badge/PyTorch-2.11%2Brocm7.14-red.svg)]()
-[![Release: v0.2.0](https://img.shields.io/badge/Release-v0.2.0-green.svg)](https://github.com/drwolfen/radiance-vllm-qwen4exp/releases/tag/v0.2.0)
+[![Release: v0.3.0](https://img.shields.io/badge/Release-v0.3.0-green.svg)](https://github.com/drwolfen/radiance-vllm-qwen4exp/releases/tag/v0.3.0)
 
 An optimized, production-grade **vLLM** inference engine specifically engineered for **`Qwen3.8-Flash-Next`** (`UD-IQ4_XS`, `qwen4exp` hybrid SSM + QSA + PLE + 512-MoE) on **Dual AMD Radeon AI PRO R9700 GPUs (`gfx1201 / RDNA4`)** in Tensor Parallel (`TP=2`).
 
-Built strictly on the qualified **`Dyluhn/R9V`** architecture, it features pure vLLM tensor execution (zero `llama.cpp` runtime dependencies), custom `gfx1201` HIP kernels, an asymmetric 16-slot LRU dynamic expert cache on Rank 1, SSD-backed Prompt-Level Embedding (PLE) offload, and a dedicated **FP8 MTP-2 draft head** delivering **43.15 tok/s sustained decode** (72.6% speculative acceptance rate) and **1,727 tok/s prefill**.
+Built strictly on the qualified **`Dyluhn/R9V`** architecture, it features pure vLLM tensor execution (zero `llama.cpp` runtime dependencies), custom `gfx1201` HIP kernels (including gfx12 int8 WMMA grouped MoE prefill), an asymmetric 16-slot LRU dynamic expert cache on Rank 1, SSD-backed Prompt-Level Embedding (PLE) offload with host-fence synchronization, and a dedicated **FP8 MTP-2 draft head** delivering **up to 44.2 tok/s sustained decode** and **>1,680 tok/s prefill**.
 
 ---
 
@@ -356,6 +356,24 @@ Output:
   ```bash
   sudo ufw allow from <YOUR_LAN_SUBNET> to any port 8000 proto tcp comment 'vLLM API'
   ```
+
+---
+
+## 📝 Changelog
+
+### v0.3.0 (2026-09-19)
+- **Synchronized Upstream R9V (commit `9d5026c`)**:
+  - Integrated gfx12 int8 WMMA grouped MoE prefill kernels (`r9v_moe_wmma.cu`) delivering >1,680 tok/s prompt processing on RDNA4.
+  - Re-derived IQ4 expert placement package (`qualified-128k-r9`, 46/434 cache 160/0).
+  - Vendor submodule updates: `vendor/vllm` (`9ec060c`), `vendor/vllm-gguf-plugin` (`d378a25`).
+- **PLE Host Fence & Offload Fix**:
+  - Added missing `ple_offload_layer.py` overlay into runtime image Dockerfile to ensure `wait_offloaded_output` is available during graph warmup.
+  - Host-fence cross-process CPU offload synchronization preventing GPU polling kernel deadlocks.
+- **Performance Gains**:
+  - Sustained decode speed increased up to **44.18 tok/s** (+50% over baseline non-WMMA build).
+  - Long prompt decode speed up to **38.09 tok/s**.
+- **Image Publication**:
+  - Published updated container to `ghcr.io/drwolfen/radiance-vllm-qwen4exp:0.3.0` and `:latest`.
 
 ---
 
