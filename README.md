@@ -214,6 +214,7 @@ docker run -d \
   -e VLLM_PLE_BOUNDED_CHUNK_BYTES=4096 \
   -e VLLM_GGUF_FUSED_MOE_SHARED_EPILOGUE=1 \
   -e QWEN38_USE_HIP_FUSED_GDN_MTP=1 \
+  -e R9V_PLE_HOST_FENCE=1 \
   -e VLLM_PLE_MMAP_HOST_REGISTER=0 \
   -e GGUF_PLE_MMAP_TRIM_ROWS=131072 \
   r9v-qwen38-flash-next:latest \
@@ -248,7 +249,7 @@ docker run -d \
 
 > [!IMPORTANT]
 > **Realistic Initial Model Loading Time**:
-> Initial cold startup takes **approximately 20–35 minutes**.
+> Initial cold startup takes **approximately 3.5 to 4.5 minutes** (on a system equipped with a very fast NVMe SSD and $\ge 160\text{ GB}$ host RAM).
 > The architecture contains 48 layers with 512 MoE experts per layer (total 24,576 individual expert weight tensors) that are unpacked, validated, and mapped across dual GPUs (VRAM) and the 112.5 GiB host UVA pinned RAM pool, alongside verifying the 28.80 GiB SSD-backed PLE table.
 > Sustained high multi-core CPU utilization (300%+ per worker process, accumulating 1.5–2 hours of cumulative core-time) during this phase is expected behavior. Do **not** terminate or restart the container while `Worker_TP0` and `Worker_TP1` are processing. Once loaded, all weights remain memory-resident for zero-overhead inference.
 
