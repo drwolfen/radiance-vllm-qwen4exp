@@ -259,3 +259,25 @@ unchanged restart all passed:
   `runtime-kv-pressure` FAIL: qualification's own 130,941-token prompt is
   preempted a few times (it still completes and passes). The counter resets on
   restart, and the doctor is then clean. Planned for v0.4.2.
+
+### Local deployment verification (radiance host, 2026-09-26)
+
+Replaced the running `r9v-qwen38-flash-next` service (previously the standard
+`qwen38` ud-iq4-xs profile on the v0.3.0-era image) with
+`qwen38-mtp4-uncensored` on the v0.4.4 runtime, installed from the published
+artifacts:
+
+- Model package `qwen38-flash-next-uncensored-iq4-xs-mtp-blockfp8-mmproj-f16`
+  fetched from HF `Dyluhn/Qwen3.8-Flash-Next-Uncensored-R9V-IQ4_XS@8112610`:
+  20 required artifacts, 92.39 GiB, size+sha256 verified (1 optional absent).
+- Runtime image `sha256:2dac17a2...` loaded from the `v0.3.0-rc1-images`
+  public bundle; all 16 runtime overlays match their pinned SHA-256.
+- Setup: host doctor PASS=27 WARN=4 FAIL=0; PLE table 26.82 GiB derived.
+- First start (cold compile, CED on): ready in ~600 s; first-start
+  qualification passed (including the 130,941-token prompt); runtime doctor
+  PASS=33 WARN=6 FAIL=0.
+- CED prefill, same server, 14,420-token prompt, `max_tokens=1`: 6.25 s with
+  `--ced on` vs 10.86 s with `"vllm_xargs": {"r9v_ced": false}` = **1.74x**.
+- MTP: 54 drafts / 109 accepted, mean emitted length 3.019, acceptance 50.5%.
+- Rollback retained: the previous image (`r9v-qwen38-flash-next:latest`,
+  `sha256:36237d4034b0`) and its launching script were left in place.
