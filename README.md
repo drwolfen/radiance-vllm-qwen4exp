@@ -76,6 +76,7 @@ The reference system uses:
 - Two **32 GiB Radeon AI PRO R9700** cards (`gfx1201`).
 - Linux with working AMD GPU drivers, `amd-smi`, `/dev/kfd` and `/dev/dri` access.
 - **128 GiB host RAM**. Smaller hosts are untested; cold expert allocations use host memory. `qwen38-mtp4-uncensored` checks for **60.8 GiB available** before start with CED on or quality, 56.3 GiB with `--ced off` (was 71.4 GiB in v0.4.0): its host expert copy is 40.3 GiB plus a 16 GiB PLE reserve, plus 4.50 GiB of pinned copies of the CED projector and the vision encoder.
+- **At least 160 GB combined** to run the complete working set from VRAM and system RAM: **64 GB of VRAM** (2 × 32 GiB cards) plus **at least ~96 GiB of system RAM** for the expert copies, the PLE reserve and the pinned CED/vision copies. The reference host provides ~157 GiB of RAM. Below ~160 GB combined the runtime falls back to SSD residency for the PLE/expert tiers, which is slower.
 - An asymmetric PCIe layout: rank 0 on Gen5 x16 and rank 1 across Gen4 x4. GPU ordering matters to placement and performance.
 - Git, Python 3.10+, Docker and the Hugging Face CLI described in the [installation guide](docs/installation.md).
 
@@ -249,6 +250,31 @@ SUPPORT_DIR=/path/to/private/r9v-support
 Collection stays local and never uploads automatically. Configuration summaries hide credentials and personal paths, but raw application and kernel logs can contain identifying information or request content. Review the archive before attaching it to a GitHub issue. Include the profile, failed command, approximate failure time and whether the server, container or whole host stopped responding. Do not attach model weights or private prompts.
 
 Doctor distinguishes configured settings from observed execution. Missing live metrics after a container stops are reported as unavailable; a missing kernel marker alone does not prove the wrong kernel ran. See the [configuration reference](profiles/qwen38-flash-next/dual-r9700/README.md) for available controls and corrective actions.
+
+## History
+
+R9V was created by [Dyluhn](https://github.com/Dyluhn/R9V) to run Qwen3.8 Flash
+Next on two AMD Radeon AI PRO R9700 (`gfx1201`) GPUs: a pinned vLLM fork, GGUF
+loading, specialized `gfx1201` HIP kernels, expert offloading and four-token MTP
+speculative decoding, exposed as an OpenAI-compatible API. Releases progressed
+from the initial image through the WMMA-prefill image (`v0.3.0-rc1-images`) to
+the v0.4.x line: **v0.4.0** put the uncensored IQ4_XS model on the consolidated
+1.3.0 runtime with CED long-prompt prefill on by default; **v0.4.1** deduped the
+host expert copy (RAM floor 71.4 → 56.3 GiB); **v0.4.2** added opt-in
+`--ced quality`; **v0.4.3** made the quality projector share one VRAM region
+with the vision encoder; **v0.4.4** extends that sharing to the default
+`--ced on` (a further ~0.4 GiB free per GPU).
+
+`radiance-vllm-qwen4exp` (this repository, [drwolfen](https://github.com/drwolfen))
+is a downstream fork of R9V. It began as a standalone runtime package, was later
+rebased onto the Dyluhn/R9V architecture without llama.cpp, and now tracks
+upstream on the `sync-upstream-v0.4.4` branch while keeping local artifacts
+(`Makefile`, `docker-compose.yml`, `tests/vllm_benchmark_suite.py`). The
+**radiance v0.4.4.1** release builds on R9V v0.4.4 (`aeee44f`): it raises the
+`qwen38-mtp4-uncensored` envelope from 128K to **192K context** and records the
+deployment verification (see above). The default branch carries this work; the
+pre-fork radiance documentation lineage is preserved at
+`archive/main-20260926`.
 
 ## Source and development
 

@@ -320,4 +320,10 @@ was tested and rejected on the radiance host:
   at 130,919 tokens, vision and greedy determinism passed; 600 s soak passed
   with 60 requests and 0 errors.
 
+**Reason to keep `max_num_seqs=1`:** on this VRAM-maxed profile, letting more
+than one sequence decode at once against the shared arbitrary-expert cache and
+the fixed KV budget *reduces* total throughput and multiplies per-token latency,
+and it cannot meet the 1.5 GiB free-VRAM target the runtime qualifies against.
+One active sequence is both faster and the only configuration that qualifies.
+
 The single active sequence remains the qualified configuration.
