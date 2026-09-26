@@ -10,6 +10,8 @@ Each profile binds a model package, runtime, hardware layout and expert placemen
 
 **New in v0.4.4:** `qwen38-mtp4-uncensored` with the default `--ced on` now shares one VRAM region per GPU between the vision encoder's weights and the CED projector, as `--ced quality` does since v0.4.3. GPU 0 keeps 2.07 GiB free at its minimum in first-start qualification instead of 1.65 (GPU 1: 2.52 instead of 2.12), with the same prefill speedup, decode, outputs and image support. Start now needs 60.8 GiB of available RAM with CED on (56.3 GiB with `--ced off`). See the [changelog](CHANGELOG.md).
 
+**Radiance fork:** builds on v0.4.4 with the `qwen38-mtp4-uncensored` envelope raised to **192K context** and verified end-to-end on the reference host. See [Radiance v0.4.4 deployment](#radiance-v044-deployment-192k-mtp4--ced-uncensored) below and the [changelog](CHANGELOG.md).
+
 **New in v0.4.3:** `qwen38-mtp4-uncensored --ced quality` now passes first-start qualification on the reference host, with image support kept: the vision encoder's weights and the quality projector take turns in one VRAM region per GPU, and the projector's work buffers are smaller. GPU 0 kept 2.04 GiB free (v0.4.2: 0.90, target 1.5), more than `on` (1.65). See the [changelog](CHANGELOG.md).
 
 **New in v0.4.2:** `qwen38-mtp4-uncensored` has an opt-in CED quality mode, `--ced quality`, that gives up less long-context quality for less prefill speedup (it did not fit on the reference host until v0.4.3). Right after a first start, `./r9v doctor --runtime` no longer fails its KV-pressure check because of qualification's own long prompt.
@@ -24,7 +26,7 @@ Each profile binds a model package, runtime, hardware layout and expert placemen
 |---|---|---|---|
 | `qwen38-mtp4` | [IQ4_XS model bundle](https://huggingface.co/Dyluhn/Qwen3.8-Flash-Next-R9V-IQ4_XS) | MTP4, dual R9700, 128K context | Reference setup/start/restart passed |
 | `qwen38-q4-xl` | [Q4_K_XL weights](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/tree/2c41bd2a0b3f51c503c11f1c7ed2e6bb34036beb/UD-Q4_K_XL) | MTP4, dual R9700, 128K context | Reference setup/start/restart passed |
-| `qwen38-mtp4-uncensored` | [Uncensored IQ4_XS bundle](https://huggingface.co/Dyluhn/Qwen3.8-Flash-Next-Uncensored-R9V-IQ4_XS) (abliterated, **no refusals**) | Consolidated 1.3.0 runtime with host expert dedupe: MTP4, dual R9700, 128K context, CED on; needs 60.8 GiB free RAM at start (56.3 GiB with `--ced off`) | v0.4.1 clean install (fetch, setup, first start CED on/off, restart) passed on the reference host; v0.4.3 (`--ced quality`) and v0.4.4 (`--ced on`) clean installs passed there too (below) |
+| `qwen38-mtp4-uncensored` | [Uncensored IQ4_XS bundle](https://huggingface.co/Dyluhn/Qwen3.8-Flash-Next-Uncensored-R9V-IQ4_XS) (abliterated, **no refusals**) | Consolidated 1.3.0 runtime with host expert dedupe: MTP4, dual R9700, 192K context (radiance), CED on; needs 60.8 GiB free RAM at start (56.3 GiB with `--ced off`) | v0.4.1 clean install (fetch, setup, first start CED on/off, restart) passed on the reference host; v0.4.3 (`--ced quality`), v0.4.4 (`--ced on`) and the radiance 192K extension passed there too (below) |
 
 **About `qwen38-mtp4-uncensored`.** Its model had its refusal behavior removed and will comply with harmful requests the original model refuses. Use it for research, and add your own moderation before exposing it to anyone. R9V serves it on 127.0.0.1 only; setting `R9V_HOST_BIND` to expose it gives anyone who can reach the port an unauthenticated model with no refusals.
 
@@ -181,6 +183,41 @@ The IQ4 image7 streaming reference retained **131,072 context tokens** and passe
 
 The [current IQ4 reference evidence](docs/qualification/results/iq4-image7-exact-host-reference-20260912.json) records the measured result and independently verified archive commitments. Historical prefill and comparator results remain in the [earlier Qwen qualification](docs/qualification/qwen38-ud-iq4-xs-dual-r9700.md); they should not be substituted for measurements of the new placements.
 
+## Radiance v0.4.4 deployment (192K, MTP4 + CED, uncensored)
+
+The radiance fork installs `qwen38-mtp4-uncensored` on the v0.4.4 runtime and
+raises its envelope from 128K to **192K** tokens. The model is natively 256K
+(`qwen4exp.context_length = 262144`, rope base 1e7), so no RoPE scaling is used;
+the 128K figure was a runtime configuration.
+
+Verified on the dual-R9700 reference host (`192.168.41.244`) by fetching the
+published bundle (`sha256:2dac17a2…`, 16 runtime overlays SHA-matched) and the
+model package (20 artifacts, 92.39 GiB, size+sha256), then setup, first start
+and first-start qualification:
+
+| Metric | 128K (v0.4.4) | 192K (radiance) |
+|---|---:|---:|
+| Max context | 131,072 | **196,608** |
+| GPU KV cache | 137,196 tok | **213,995 tok** |
+| Concurrency at full context | 1.05x | 1.09x |
+| Decode (fixed prompt, MTP4) | 21.60 ms/step | **21.66 ms/step** |
+| CED prefill (14,420 tok) | 1.74x | 1.57–1.74x |
+
+- First-start qualification passed at the new envelope (`context_limit=196608`,
+  headroom min free 2.06 / 1.52 GiB against the 1.5 GiB target). KV measured at
+  18,676 B/token per rank; the 196,479-token probe was preempted four times by
+  the fixed budget and still completed.
+- Extended suite: 41.5 tok/s single-stream, TPOT p50 55.5 ms; prefill
+  1,265–6,198 tok/s from 8K to 143K with CED; needle retrieval at 130,919
+  tokens, vision and greedy determinism all passed; a 600 s soak passed with 0
+  errors.
+- **`max_num_seqs` is kept at 1.** Raising it to 4 (with capture sizes
+  `[1,5,10,15,20]`) lowered throughput to 22.7–29.9 tok/s and raised TPOT to
+  245–360 ms, and its peak free VRAM on rank 1 (1.425 GiB) fell below the
+  1.5 GiB target, so qualification refused it. Concurrent decode against the
+  shared arbitrary-expert cache and fixed KV is a net loss; the single active
+  sequence is the qualified configuration.
+
 ## Verified public setup and restart
 
 Both profiles passed ordinary setup into new state directories, first-start text/tool/vision/context/idle-resume checks and restart with the same verified receipt. The first starts used an actual 130,941-token prompt at a 131,072 context limit. Model, head and PLE bytes stayed unchanged.
@@ -227,7 +264,7 @@ tools/                setup, planning, qualification, doctor and support
 tests/                CPU checks and explicit GPU qualification tests
 ```
 
-The kernels are specialized for supported shapes, quantizations and `gfx1201`. A different model, GPU, topology or runtime image requires its own validation. Current reference qualification covers one active sequence at a time.
+The kernels are specialized for supported shapes, quantizations and `gfx1201`. A different model, GPU, topology or runtime image requires its own validation. Current reference qualification covers one active sequence at a time. Raising `max_num_seqs` was tested and refused: concurrent decode against the shared arbitrary-expert cache and fixed KV lowered throughput and broke the 1.5 GiB free-VRAM target, so the single active sequence stays the qualified configuration.
 
 Run the CPU and static checks with:
 

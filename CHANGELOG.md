@@ -301,3 +301,23 @@ rope scaling), so the 128K cap was configuration. The
   completed, matching the documented first-start behaviour.
 - Decode unchanged: 21.60 -> 21.66 ms/step (median, fixed prompt, MTP4);
   mean acceptance length 2.93. CED prefill 1.57-1.74x at 14,420 tokens.
+
+### Concurrency test: `max_num_seqs` stays 1 (2026-09-26)
+
+Raising `max_num_seqs` to 4 (with cudagraph capture sizes `[1,5,10,15,20]`)
+was tested and rejected on the radiance host:
+
+- Throughput fell: 1 stream 41.7 tok/s, 2 streams 22.7, 4 streams 29.9, while
+  TPOT rose to 245-360 ms. MTP speculation stayed healthy (48-73% acceptance),
+  so the cost is concurrent decode against the shared arbitrary-expert cache
+  and the fixed KV budget, not speculation.
+- Qualification refused it: `workload-envelope` ("concurrency or MTP depth
+  differs from the one-sequence/MTP4 reference") and headroom (peak free on
+  rank 1 1.425 GiB < the 1.5 GiB target; the one-sequence run kept 1.518).
+- Extended-suite and soak results for the retained one-sequence profile
+  (2026-09-26): 41.5 tok/s single-stream, TPOT p50 55.5 ms, APC 1.03x, tool
+  PASS; prefill 1,265-6,198 tok/s from 8K to 143K with CED; needle retrieval
+  at 130,919 tokens, vision and greedy determinism passed; 600 s soak passed
+  with 60 requests and 0 errors.
+
+The single active sequence remains the qualified configuration.
