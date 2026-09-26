@@ -5,7 +5,7 @@
 [![ROCm: 7.14.0 / 7.2.4](https://img.shields.io/badge/ROCm-7.14.0%20%2F%207.2.4-blue.svg)]()
 [![vLLM: 0.28.0](https://img.shields.io/badge/vLLM-0.28.0-orange.svg)]()
 [![PyTorch: 2.11+rocm7.14](https://img.shields.io/badge/PyTorch-2.11%2Brocm7.14-red.svg)]()
-[![Release: v0.3.0](https://img.shields.io/badge/Release-v0.3.0-green.svg)](https://github.com/drwolfen/radiance-vllm-qwen4exp/releases/tag/v0.3.0)
+[![Release: v0.4.4](https://img.shields.io/badge/Release-v0.4.4-green.svg)](https://github.com/drwolfen/radiance-vllm-qwen4exp/releases/tag/v0.4.4-radiance)
 
 An optimized, production-grade **vLLM** inference engine specifically engineered for **`Qwen3.8-Flash-Next`** (`UD-IQ4_XS`, `qwen4exp` hybrid SSM + QSA + PLE + 512-MoE) on **Dual AMD Radeon AI PRO R9700 GPUs (`gfx1201 / RDNA4`)** in Tensor Parallel (`TP=2`).
 
@@ -361,6 +361,21 @@ Output:
 ---
 
 ## 📝 Changelog
+
+### v0.4.4 (2026-09-26) — Upstream R9V Sync
+- **Synchronized Upstream Dyluhn/R9V v0.4.0 → v0.4.4**:
+  - **CED Dynamic VRAM-Vision Swapping**: Vision encoder (0.42 GiB/GPU) and CED prefill projector (1.76 GiB/GPU) now dynamically share a single VRAM region, freeing +0.42–0.84 GiB per GPU.
+  - **CED Prefill Acceleration**: 1.5× to 1.82× faster prefill on prompts ≥ 8,192 tokens via split-16 distillation projector.
+  - **Expert Deduplication**: Rank 1 pins its 400 most-routed experts; host RAM floor drops from 71.4 GiB to 56.3 GiB (60.8 GiB with CED enabled).
+  - **R9V_PLE_HOST_FENCE**: Tiered memory compaction for host expert copies, preventing cross-process fence deadlocks on multi-GPU systems.
+- **Local Patches Preserved**: `Makefile`, `docker-compose.yml`, and `tests/vllm_benchmark_suite.py` maintained across sync.
+- **Verified Benchmarks (dual R9700, TP=2)**:
+  - Single-stream decode: **45.8 tok/s** (TPOT 40.9 ms, TTFT 511.6 ms)
+  - Multi-stream: **41.8 – 45.0 tok/s**
+  - APC prefix caching: **1.14× speedup** (cold 1,673 ms → warm 1,463 ms)
+  - Tool calling: **100% PASS**
+  - Full regression suite: **752 tests PASSED, 0 failures**
+- **Published**: Branch `sync-upstream-v0.4.4`, tag `v0.4.4-radiance`.
 
 ### v0.3.0 (2026-09-19)
 - **Synchronized Upstream R9V (commit `9d5026c`)**:
