@@ -300,8 +300,8 @@ def main():
     args = parser.parse_args()
     if not 5 <= args.request_timeout <= 1200:
         parser.error("--request-timeout must be 5..1200 seconds")
-    if not 0 <= args.context <= 131072:
-        parser.error("--context must be 0..131072")
+    if not 0 <= args.context <= 262144:
+        parser.error("--context must be 0..262144")
     try:
         run(args.url, args.model, args.output, args.context, args.request_timeout)
     except (OSError, ValueError, KeyError, TypeError) as error:

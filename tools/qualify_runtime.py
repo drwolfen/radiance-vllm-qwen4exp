@@ -74,10 +74,10 @@ def validate(protocol):
     arms = protocol.get("arms")
     context = protocol.get("workload_context")
     if context is not None and (
-        type(context) is not int or not 512 <= context <= 131072
+        type(context) is not int or not 512 <= context <= 262144
     ):
         raise ValueError(
-            "workload_context must be 512..131072; partial probes do not qualify the full envelope"
+            "workload_context must be 512..262144; partial probes do not qualify the full envelope"
         )
     if not isinstance(arms, list) or not arms:
         raise ValueError("arms must be a nonempty list")

@@ -281,3 +281,23 @@ artifacts:
 - MTP: 54 drafts / 109 accepted, mean emitted length 3.019, acceptance 50.5%.
 - Rollback retained: the previous image (`r9v-qwen38-flash-next:latest`,
   `sha256:36237d4034b0`) and its launching script were left in place.
+
+### 192K context on the radiance host (2026-09-26)
+
+The model is natively 256K (`qwen4exp.context_length=262144`, rope base 1e7, no
+rope scaling), so the 128K cap was configuration. The
+`qwen38-mtp4-uncensored` envelope was raised to 192K without attenuating decode:
+
+- `R9V_MAX_MODEL_LEN=196608`, `R9V_KV_CACHE_MEMORY_BYTES=3672113152`; runtime
+  descriptor `context_tokens=196608`.
+- Qualification ceilings raised 131072 -> 262144 in
+  `tools/qualify_runtime.py` (`workload_context`) and
+  `tools/runtime_workload.py` (`--context`).
+- GPU KV cache 137,196 -> 213,995 tokens; concurrency at the full envelope
+  1.05x -> 1.09x. KV measured at 18,676 B/token per rank.
+- Re-qualified at the new envelope: passed, `context_limit=196608`, headroom
+  passed (min free 2.06 / 1.52 GiB against the 1.5 GiB target). The
+  196,479-token probe was preempted 4 times by the fixed KV budget and still
+  completed, matching the documented first-start behaviour.
+- Decode unchanged: 21.60 -> 21.66 ms/step (median, fixed prompt, MTP4);
+  mean acceptance length 2.93. CED prefill 1.57-1.74x at 14,420 tokens.

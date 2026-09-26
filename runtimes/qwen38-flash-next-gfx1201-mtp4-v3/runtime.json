@@ -28,7 +28,7 @@
       "Q5_1",
       "Q6_K"
     ],
-    "context_tokens": 131072,
+    "context_tokens": 196608,
     "max_cache_slots": 192,
     "reference_mtp_depth": 4,
     "expert_channel_partitions": [
